@@ -35,20 +35,45 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    struct epoll_event ev, evnets[MAX_EVENTS];
+    struct epoll_event ev, events[MAX_EVENTS];
+	int epoll_fd, nfds, i;
 
-    epoll_create1();
+	epoll_fd = epoll_create1(0);
+	if (epoll_fd == -1) {
+		fprintf(stderr, "failed to epoll_create1\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ev.events = EPOLLIN;
+	ev.data.fd = sfd;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sfd, &ev) == -1) {
+		fprintf(stderr, "failed to epoll_ctl\n");
+		exit(EXIT_FAILURE);
+	}
 
     struct sockaddr_in peer_addr;
     socklen_t peer_addr_size = sizeof(peer_addr);
 
     while (1) {
-        cfd = accept(sfd, (struct sockaddr*) &peer_addr, &peer_addr_size);
-        if (cfd == -1) {
-            fprintf(stderr, "failed to accept");
-            exit(EXIT_FAILURE);
-        }
-        printf("accepted\n");
+		nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+		if (nfds == -1) {
+			fprintf(stderr, "failed to epoll_wait\n");
+			exit(EXIT_FAILURE);
+		}
+
+		for (i =0; i < nfds; i++) {
+			if (events[i].data.fd == sfd) {
+				cfd = accept(sfd, (struct sockaddr*) &peer_addr, &peer_addr_size);
+				if (cfd == -1) {
+					fprintf(stderr, "failed to accept");
+					exit(EXIT_FAILURE);
+				}
+				printf("accepted\n");
+
+			} else {
+
+			}
+		}
 
         ssize_t len;
         uint8_t buf[1024];
