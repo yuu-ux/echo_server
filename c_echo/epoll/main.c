@@ -21,7 +21,6 @@ struct session {
 int main(void) {
     int sfd, cfd;
 
-    printf("hello\n");
     sfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sfd == -1) {
         fprintf(stderr, "failed to create a socket\n");
@@ -37,7 +36,7 @@ int main(void) {
     };
 
     if (bind(sfd, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
-        fprintf(stderr, "failed to bind\n");
+        perror("failed to bind\n");
         exit(EXIT_FAILURE);
     }
 
@@ -57,7 +56,11 @@ int main(void) {
 
 	ev.events = EPOLLIN;
     struct session *sess;
-    sess = (struct session *)malloc(sizeof(sess));
+    sess = (struct session *)malloc(sizeof(struct session));
+	if (sess == NULL) {
+		fprintf(stderr, "failed to malloc\n");
+		exit(EXIT_FAILURE);
+	}
     sess->fd = sfd;
 	ev.data.ptr = (void*)sess;
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sfd, &ev) == -1) {
@@ -76,46 +79,76 @@ int main(void) {
 		}
 
 		for (i = 0; i < nfds; i++) {
-			if (events[i].data.fd == sfd) {
+			sess = events[i].data.ptr;
+			if (sess->fd == sfd) {
 				cfd = accept4(sfd, (struct sockaddr*) &peer_addr, &peer_addr_size, SOCK_NONBLOCK);
 				if (cfd == -1) {
 					fprintf(stderr, "failed to accept");
 					exit(EXIT_FAILURE);
 				}
 				printf("accepted\n");
+				sess = (struct session *)malloc(sizeof(struct session));
+				if (sess == NULL) {
+					fprintf(stderr, "failed to malloc\n");
+					exit(EXIT_FAILURE);
+				}
 
+				sess->fd = cfd;
+				sess->state = 0;
+				sess->len = 0;
+				sess->written = 0;
                 ev.events = EPOLLIN;
-                ev.data.fd = cfd;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, cfd, ev) == -1) {
+				ev.data.ptr = (void *)sess;
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, cfd, &ev) == -1) {
                     fprintf(stderr, "failed to epoll_ctl on cfd\n");
                     exit(EXIT_FAILURE);
                 }
 			} else {
                 // peer socket
-                switch (events[i].data.u32 == 0) {
+                switch (sess->state) {
                     case 0: // READ
+						sess->len = read(sess->fd, sess->buf, 1024);
+						if (sess->len == 0) {
+							if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, sess->fd, NULL) == -1) {
+								fprintf(stderr, "failed to epoll_ctl\n");
+								exit(EXIT_FAILURE);
+							}
+							free((void *)sess);
+						} else {
+							sess->written = 0;
+							sess->state = 1;
+							ev.events = EPOLLOUT;
+							ev.data.ptr = (void *)sess;
+							if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sess->fd, &ev) == -1) {
+								fprintf(stderr, "failed to epoll_ctl\n");
+								exit(EXIT_FAILURE);
+							}
+						}
                         break;
                     case 1: // WRITE
+						;
+						ssize_t ret;
+						ret = write(sess->fd, sess->buf + sess->written, sess->len - sess->written);
+						if (ret == -1) {
+							fprintf(stderr, "failed to write\n");
+							exit(EXIT_FAILURE);
+						}
+						sess->written += ret;
+						if (sess->written >= sess->len) {
+							sess->state = 0;
+							sess->len = 0;
+							sess->written = 0;
+							ev.events = EPOLLIN;
+							ev.data.ptr = (void *)sess;
+							if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, sess->fd, &ev) == -1) {
+								fprintf(stderr, "failed to epoll_ctl\n");
+								exit(EXIT_FAILURE);
+							}
+						}
                         break ;
                 }
 			}
 		}
-
-        ssize_t len;
-        uint8_t buf[1024];
-        while ((len = read(cfd, buf, 1024)) != 0) {
-            ssize_t written = 0;
-            while (written < len) {
-                ssize_t ret = write(cfd, buf+written, len-written);
-                if (ret == -1) {
-                    fprintf(stderr, "failed to write\n");
-                    exit(EXIT_FAILURE);
-                }
-                written += ret;
-            }
-        }
-        printf("closed\n");
     }
-    printf("%d ok\n", cfd);
     return 0;
 }
