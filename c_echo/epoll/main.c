@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -6,6 +8,15 @@
 #include <netinet/in.h>
 
 #define MAX_EVENTS 10
+#define BUF_SIZE 10
+
+struct session {
+    int fd;
+    int state;
+    ssize_t len;
+    ssize_t written;
+    uint8_t buf[1024];
+};
 
 int main(void) {
     int sfd, cfd;
@@ -45,7 +56,10 @@ int main(void) {
 	}
 
 	ev.events = EPOLLIN;
-	ev.data.fd = sfd;
+    struct session *sess;
+    sess = (struct session *)malloc(sizeof(sess));
+    sess->fd = sfd;
+	ev.data.ptr = (void*)sess;
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sfd, &ev) == -1) {
 		fprintf(stderr, "failed to epoll_ctl\n");
 		exit(EXIT_FAILURE);
@@ -61,17 +75,29 @@ int main(void) {
 			exit(EXIT_FAILURE);
 		}
 
-		for (i =0; i < nfds; i++) {
+		for (i = 0; i < nfds; i++) {
 			if (events[i].data.fd == sfd) {
-				cfd = accept(sfd, (struct sockaddr*) &peer_addr, &peer_addr_size);
+				cfd = accept4(sfd, (struct sockaddr*) &peer_addr, &peer_addr_size, SOCK_NONBLOCK);
 				if (cfd == -1) {
 					fprintf(stderr, "failed to accept");
 					exit(EXIT_FAILURE);
 				}
 				printf("accepted\n");
 
+                ev.events = EPOLLIN;
+                ev.data.fd = cfd;
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, cfd, ev) == -1) {
+                    fprintf(stderr, "failed to epoll_ctl on cfd\n");
+                    exit(EXIT_FAILURE);
+                }
 			} else {
-
+                // peer socket
+                switch (events[i].data.u32 == 0) {
+                    case 0: // READ
+                        break;
+                    case 1: // WRITE
+                        break ;
+                }
 			}
 		}
 
